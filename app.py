@@ -471,7 +471,7 @@ Relevant Policy Documents:
 Please provide a comprehensive, accurate answer based strictly on the above policy documents."""
 
     response = client.messages.create(
-        model="claude-sonnet-4-20250514",
+        model="claude-sonnet-4-6",
         max_tokens=1000,
         system=system_prompt,
         messages=[{"role": "user", "content": user_message}]

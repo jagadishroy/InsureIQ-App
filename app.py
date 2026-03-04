@@ -7,6 +7,7 @@ import time
 import re
 from pathlib import Path
 from anthropic import Anthropic
+import anthropic
 
 
 # ─────────────────────────────────────────────
@@ -291,7 +292,7 @@ def retrieve(query, docs, doc_vectors, df, N, top_k=5):
 # ─────────────────────────────────────────────
 # Claude Reader  ← FIXED model string
 # ─────────────────────────────────────────────
-MODEL = "claude-sonnet-4-5"   # ← corrected (was claude-sonnet-4-20250514)
+MODEL = os.getenv("ANTHROPIC_MODEL") or (st.secrets.get("ANTHROPIC_MODEL") if hasattr(st, "secrets") else None) or "claude-3-5-sonnet-latest"
 
 def build_context(retrieved: list[dict]) -> str:
     parts = []
@@ -329,13 +330,33 @@ Relevant Policy Documents:
 
 Please provide a comprehensive, accurate answer based strictly on the above policy documents."""
 
-    response = client.messages.create(
-        model=MODEL,
-        max_tokens=1000,
-        system=system_prompt,
-        messages=[{"role": "user", "content": user_message}]
-    )
-    return response.content[0].text
+    # Try primary model, then safe fallbacks (helps when a key lacks access to a newer model).
+    model_candidates = [MODEL, 'claude-3-5-sonnet-latest', 'claude-3-5-haiku-latest']
+    last_err = None
+    for m in model_candidates:
+        try:
+            response = client.messages.create(
+                model=m,
+                max_tokens=1000,
+                system=system_prompt,
+                messages=[{'role': 'user', 'content': user_message}]
+            )
+            return response.content[0].text
+        except anthropic.APIStatusError as e:
+            last_err = e
+            # Common cases: invalid model name / access issues / request schema problems.
+            # Try next model candidate if it looks model-related; otherwise re-raise.
+            msg = str(e).lower()
+            if e.status_code in (400, 404, 403) and ('model' in msg or 'not_found' in msg or 'not found' in msg or 'permission' in msg or 'access' in msg):
+                continue
+            raise
+        except anthropic.APIError as e:
+            last_err = e
+            raise
+    # If all candidates failed, surface the last error in the UI (Streamlit Cloud may redact details).
+    if last_err is not None:
+        st.error(f'Anthropic request failed: {last_err}')
+    raise last_err
 
 # ─────────────────────────────────────────────
 # Sample Queries
